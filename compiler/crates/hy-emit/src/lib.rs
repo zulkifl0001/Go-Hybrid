@@ -665,6 +665,8 @@ pub struct Emitter {
     /// Result shapes of closures bound by name in the current fn
     /// (`f := fn() error { … }`), so `f()?` knows its Go result count.
     closure_shapes: BTreeMap<String, (usize, bool)>,
+    /// Pointer-parameter mask for closures bound by name in the current fn.
+    closure_ptr_params: BTreeMap<String, Vec<bool>>,
     /// User-struct field types (Batch I): struct → (field, declared hy type
     /// name — dotted for shape-known fields, "" otherwise). Receiver typing
     /// for `stats.mu.lock()` (18).
@@ -705,6 +707,7 @@ pub(crate) struct ScopeSnapshot {
     var_struct: BTreeMap<String, String>,
     pointer_vars: BTreeSet<String>,
     loan_aliases: BTreeMap<String, BTreeSet<String>>,
+    closure_ptr_params: BTreeMap<String, Vec<bool>>,
 }
 
 impl Emitter {
@@ -736,6 +739,7 @@ impl Emitter {
             cur_fn_has_named_results: false,
             fn_shapes: BTreeMap::new(),
             closure_shapes: BTreeMap::new(),
+            closure_ptr_params: BTreeMap::new(),
             struct_fields: BTreeMap::new(),
             var_struct: BTreeMap::new(),
             var_ty: BTreeMap::new(),
@@ -764,6 +768,7 @@ impl Emitter {
             var_struct: self.var_struct.clone(),
             pointer_vars: self.pointer_vars.clone(),
             loan_aliases: self.loan_aliases.clone(),
+            closure_ptr_params: self.closure_ptr_params.clone(),
         }
     }
 
@@ -774,6 +779,7 @@ impl Emitter {
         self.var_struct = saved.var_struct;
         self.pointer_vars = saved.pointer_vars;
         self.loan_aliases = saved.loan_aliases;
+        self.closure_ptr_params = saved.closure_ptr_params;
     }
 
     pub(crate) fn shadow_local_name(&mut self, name: &str) {
@@ -1457,6 +1463,7 @@ impl Emitter {
         self.bindings.clear();
         self.var_struct.clear();
         self.closure_shapes.clear();
+        self.closure_ptr_params.clear();
         self.var_ty.clear();
         self.pointer_vars.clear();
         self.loan_aliases.clear();

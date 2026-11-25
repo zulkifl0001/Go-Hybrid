@@ -1239,26 +1239,52 @@ impl Emitter {
         // own method-receiver auto-address precedent, pinned by the
         // pre-registered corpus).
         let mut ptr_params: Vec<bool> = Vec::new();
-        if let Expr::Ident { name, .. } = callee {
-            let (fn_head, _) = split_type_args(name);
-            if let Some((_, _, _, params)) = self.fn_shapes.get(fn_head) {
-                ptr_params = params.iter().map(|p| p.is_some()).collect();
+        match callee {
+            Expr::Ident { name, .. } => {
+                if let Some(ptrs) = self.closure_ptr_params.get(name.as_str()) {
+                    ptr_params = ptrs.clone();
+                } else {
+                    let (fn_head, _) = split_type_args(name);
+                    if !self.local_vars.contains(fn_head) {
+                        if let Some((_, _, _, params)) = self.fn_shapes.get(fn_head) {
+                            ptr_params = params.iter().map(|p| p.is_some()).collect();
+                        }
+                    }
+                }
             }
+            Expr::Field { base, name, .. } => {
+                if let Some(recv_sn) = self.user_struct_name_of(base) {
+                    let (head, _) = split_type_args(name);
+                    if let Some((_, _, _, params)) =
+                        self.fn_shapes.get(&format!("{recv_sn}.{head}"))
+                    {
+                        ptr_params = params.iter().map(|p| p.is_some()).collect();
+                    }
+                }
+            }
+            Expr::FnLit { params, .. } => {
+                ptr_params = params
+                    .iter()
+                    .map(|p| matches!(self.resolve_type_alias(&p.ty), TypeExpr::Pointer { .. }))
+                    .collect();
+            }
+            _ => {}
         }
         let c = self.emit_expr(raw_callee, ATOM)?;
         let mut parts = Vec::new();
         for (i, a) in args.iter().enumerate() {
-            let t = self.emit_call_arg(a)?;
+            let peeled = Self::unwrap_parens(&a.value);
             let wants_ptr = ptr_params.get(i).copied().unwrap_or(false);
-            let already_ptr = self.expr_is_pointer(&a.value);
+            let already_ptr = self.expr_is_pointer(peeled);
             let addressable = matches!(
-                a.value,
+                peeled,
                 Expr::Ident { .. } | Expr::Field { .. } | Expr::Index { .. }
             );
-            if wants_ptr && !already_ptr && addressable {
-                parts.push(format!("&{}", t));
+            if wants_ptr && !already_ptr && addressable && !a.spread {
+                let inner = self.emit_expr(peeled, 0)?;
+                parts.push(format!("&{}", inner));
             } else {
-                parts.push(t);
+                parts.push(self.emit_call_arg(a)?);
             }
         }
         Ok(format!("{}({})", c, parts.join(", ")))

@@ -370,18 +370,30 @@ impl Emitter {
         for (i, name) in l.names.iter().enumerate() {
             let fnlit = if l.names.len() == l.values.len() {
                 match l.values.get(i).map(Self::peel_parens) {
-                    Some(Expr::FnLit { results, .. }) => Some(super::result_shape(results)),
+                    Some(Expr::FnLit {
+                        params, results, ..
+                    }) => {
+                        let ptrs: Vec<bool> = params
+                            .iter()
+                            .map(|p| {
+                                matches!(self.resolve_type_alias(&p.ty), TypeExpr::Pointer { .. })
+                            })
+                            .collect();
+                        Some((super::result_shape(results), ptrs))
+                    }
                     _ => None,
                 }
             } else {
                 None
             };
             match fnlit {
-                Some(shape) => {
+                Some((shape, ptrs)) => {
                     self.closure_shapes.insert(name.clone(), shape);
+                    self.closure_ptr_params.insert(name.clone(), ptrs);
                 }
                 None => {
                     self.closure_shapes.remove(name);
+                    self.closure_ptr_params.remove(name);
                 }
             }
         }
